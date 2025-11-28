@@ -7,12 +7,12 @@ pre-commit:
   commands:
     # Lint shell scripts
     shellcheck:
-      glob: "*.sh"
+      glob: "{*.sh,scripts/*.sh,scripts/**/*.sh}"
       run: scripts/lefthook/shellcheck.sh {staged_files}
     
     # Check bash syntax
     bash-syntax:
-      glob: "*.sh"
+      glob: "{*.sh,scripts/*.sh,scripts/**/*.sh}"
       run: scripts/lefthook/bash-syntax.sh {staged_files}
     
     # Validate plist template

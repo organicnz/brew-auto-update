@@ -60,7 +60,7 @@ The installer automatically:
 1. **Copy the script:**
 ```bash
 mkdir -p ~/Scripts
-cp brew-daily-update.sh ~/Scripts/
+cp scripts/brew-daily-update.sh ~/Scripts/
 chmod +x ~/Scripts/brew-daily-update.sh
 ```
 

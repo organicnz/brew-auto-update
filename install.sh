@@ -58,7 +58,7 @@ echo -e "${GREEN}✓ Scripts directory ready${NC}"
 
 # Copy the script
 echo "Installing brew-daily-update.sh..."
-cp brew-daily-update.sh "$SCRIPTS_DIR/"
+cp scripts/brew-daily-update.sh "$SCRIPTS_DIR/"
 chmod +x "$SCRIPTS_DIR/brew-daily-update.sh"
 echo -e "${GREEN}✓ Script installed${NC}"
 

@@ -7,7 +7,7 @@ echo "🧪 Running test suite..."
 
 # Test 1: Bash syntax for all scripts
 echo "  Testing bash syntax..."
-for script in *.sh scripts/lefthook/*.sh; do
+for script in *.sh scripts/*.sh scripts/lefthook/*.sh; do
     if [[ -f "$script" ]]; then
         bash -n "$script" || exit 1
     fi
@@ -55,7 +55,7 @@ echo "  Checking required files..."
 required_files=(
     "README.md"
     "LICENSE"
-    "brew-daily-update.sh"
+    "scripts/brew-daily-update.sh"
     "install.sh"
     "com.USER.brew-update.plist.template"
 )
