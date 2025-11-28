@@ -1,6 +1,26 @@
 # Homebrew Auto-Update
 
-Production-grade automated Homebrew package management for macOS. Runs 3x daily via launchd with intelligent pre-flight checks, differential logging, and graceful error handling.
+[![macOS](https://img.shields.io/badge/macOS-10.14+-blue.svg)](https://www.apple.com/macos/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](docs/LICENSE)
+[![Homebrew](https://img.shields.io/badge/Homebrew-required-orange.svg)](https://brew.sh)
+
+Production-grade automated Homebrew package management for **macOS only**. Runs 3x daily via launchd with intelligent pre-flight checks, differential logging, and graceful error handling.
+
+> ⚠️ **macOS Only**: This tool uses macOS-specific features (launchd, plist files) and will not work on Linux or Windows.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Management Commands](#management-commands)
+- [Troubleshooting](#troubleshooting)
+- [Requirements](#requirements)
+- [Development](#development)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
@@ -214,10 +234,12 @@ rm -rf ~/Library/Logs/brew-update*
 
 ## Requirements
 
-- macOS 10.14 or later
-- Homebrew installed
-- Bash shell
-- Write access to ~/Library/Logs
+- **macOS 10.14 (Mojave) or later** (required)
+- Homebrew installed ([install here](https://brew.sh))
+- Bash shell (included with macOS)
+- Write access to `~/Library/Logs`
+
+> **Note**: This tool is designed exclusively for macOS and uses launchd for scheduling. It will not work on Linux or Windows systems.
 
 ## Security
 
@@ -253,13 +275,20 @@ Run manually:
 lefthook run pre-commit
 ```
 
+## Documentation
+
+- 📖 [Configuration Guide](docs/CONFIGURATION.md) - Detailed configuration options
+- 🤝 [Contributing Guidelines](docs/CONTRIBUTING.md) - How to contribute
+- 📋 [System Documentation](docs/BREW-UPDATE-SYSTEM.md) - Technical details
+- 📄 [License](docs/LICENSE) - MIT License
+
 ## Contributing
 
-Contributions welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! Please see [Contributing Guidelines](docs/CONTRIBUTING.md) for details.
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](docs/LICENSE) for details
 
 ## Author
 

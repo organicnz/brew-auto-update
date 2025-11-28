@@ -6,7 +6,8 @@
 # Runs 3x daily via launchd with full error handling and cleanup
 #
 # Repository: https://github.com/organicnz/brew-auto-update
-# License: MIT
+# License: MIT (see docs/LICENSE)
+# Platform: macOS only
 ################################################################################
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
