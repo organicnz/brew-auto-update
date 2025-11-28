@@ -226,9 +226,36 @@ rm -rf ~/Library/Logs/brew-update*
 - Sandboxed to user environment
 - Safe PATH configuration
 
+## Development
+
+### Setup Development Environment
+
+```bash
+# Clone the repo
+git clone https://github.com/organicnz/brew-auto-update.git
+cd brew-auto-update
+
+# Setup development tools (lefthook, shellcheck, etc.)
+./scripts/setup-dev.sh
+```
+
+### Pre-commit Hooks
+
+Lefthook runs automatically on commit:
+- ShellCheck linting
+- Bash syntax validation
+- Plist template validation
+- Secrets detection
+- Markdown linting
+
+Run manually:
+```bash
+lefthook run pre-commit
+```
+
 ## Contributing
 
-Contributions welcome! Please open an issue or submit a pull request.
+Contributions welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

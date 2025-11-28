@@ -22,12 +22,38 @@ Thank you for your interest in contributing! This document provides guidelines f
 ### Pull Requests
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Test thoroughly on macOS
-5. Commit with clear messages (`git commit -m 'Add amazing feature'`)
-6. Push to your fork (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+2. Clone and setup development environment:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/brew-auto-update.git
+   cd brew-auto-update
+   ./scripts/setup-dev.sh
+   ```
+3. Create a feature branch (`git checkout -b feature/amazing-feature`)
+4. Make your changes
+5. Run tests: `scripts/lefthook/test.sh`
+6. Commit (lefthook will run pre-commit checks automatically)
+7. Push to your fork (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
+
+### Git Hooks
+
+This project uses [Lefthook](https://github.com/evilmartians/lefthook) for git hooks:
+
+**Pre-commit:**
+- ShellCheck linting
+- Bash syntax validation
+- Plist template validation
+- Secrets detection
+- Markdown linting
+
+**Pre-push:**
+- Full test suite
+
+Run manually:
+```bash
+lefthook run pre-commit
+lefthook run pre-push
+```
 
 ## Development Guidelines
 

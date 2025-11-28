@@ -1,0 +1,37 @@
+# Lefthook configuration for brew-auto-update
+# https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  
+  commands:
+    # Lint shell scripts
+    shellcheck:
+      glob: "*.sh"
+      run: scripts/lefthook/shellcheck.sh {staged_files}
+    
+    # Check bash syntax
+    bash-syntax:
+      glob: "*.sh"
+      run: scripts/lefthook/bash-syntax.sh {staged_files}
+    
+    # Validate plist template
+    plist-check:
+      glob: "*.plist.template"
+      run: scripts/lefthook/plist-check.sh {staged_files}
+    
+    # Check for secrets/tokens
+    secrets-check:
+      glob: "*"
+      run: scripts/lefthook/secrets-check.sh {staged_files}
+    
+    # Markdown linting
+    markdown-lint:
+      glob: "*.md"
+      run: scripts/lefthook/markdown-lint.sh {staged_files}
+
+pre-push:
+  commands:
+    # Run full test suite before push
+    test:
+      run: scripts/lefthook/test.sh
