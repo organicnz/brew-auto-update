@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.{{USER}}.brew-update</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>{{HOME}}/Scripts/brew-daily-update.sh</string>
+    </array>
+    
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>{{HOUR1}}</integer>
+            <key>Minute</key>
+            <integer>{{MINUTE1}}</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>{{HOUR2}}</integer>
+            <key>Minute</key>
+            <integer>{{MINUTE2}}</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>{{HOUR3}}</integer>
+            <key>Minute</key>
+            <integer>{{MINUTE3}}</integer>
+        </dict>
+    </array>
+    
+    <key>StandardOutPath</key>
+    <string>{{HOME}}/Library/Logs/brew-update-stdout.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>{{HOME}}/Library/Logs/brew-update-stderr.log</string>
+    
+    <key>RunAtLoad</key>
+    <false/>
+    
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <key>Nice</key>
+    <integer>{{NICE_LEVEL}}</integer>
+    
+    <key>LowPriorityIO</key>
+    <true/>
+    
+    <key>AbandonProcessGroup</key>
+    <true/>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>LOG_DIR</key>
+        <string>{{HOME}}/Library/Logs</string>
+        <key>LOG_RETENTION_DAYS</key>
+        <string>{{LOG_RETENTION_DAYS}}</string>
+        <key>MIN_DISK_SPACE_GB</key>
+        <string>{{MIN_DISK_SPACE_GB}}</string>
+    </dict>
+    
+    <key>ThrottleInterval</key>
+    <integer>{{THROTTLE_INTERVAL}}</integer>
+    
+    <key>ExitTimeOut</key>
+    <integer>{{EXIT_TIMEOUT}}</integer>
+</dict>
+</plist>
