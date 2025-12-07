@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](docs/LICENSE)
 [![Homebrew](https://img.shields.io/badge/Homebrew-required-orange.svg)](https://brew.sh)
 
-Production-grade automated Homebrew package management for **macOS only**. Runs 3x daily via launchd with intelligent pre-flight checks, differential logging, and graceful error handling.
+Production-grade automated Homebrew and NPM package management for **macOS only**. Runs 3x daily via launchd with intelligent pre-flight checks, differential logging, and graceful error handling.
 
 > ⚠️ **macOS Only**: This tool uses macOS-specific features (launchd, plist files) and will not work on Linux or Windows.
 
@@ -35,6 +35,11 @@ Production-grade automated Homebrew package management for **macOS only**. Runs 
 - Upgrade all casks (with --greedy flag)
 - Cleanup old versions (30-day retention)
 - Autoremove unused dependencies
+
+✅ **NPM Integration**
+- Checks for global npm installation
+- Updates all global npm packages
+- Skips gracefully if npm is missing
 
 ✅ **Robust Error Handling**
 - Lock file prevents concurrent runs
@@ -304,3 +309,6 @@ Created for automated Homebrew maintenance on macOS systems.
 - Automatic log rotation
 - 3x daily scheduling
 - Desktop notifications
+
+### v1.1.0
+- Added global NPM package auto-updates

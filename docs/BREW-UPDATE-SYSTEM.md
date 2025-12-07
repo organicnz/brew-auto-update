@@ -37,6 +37,7 @@
 - Update Homebrew itself
 - Upgrade all formulae
 - Upgrade all casks (with --greedy flag)
+- Update global NPM packages
 - Cleanup old versions (30-day retention)
 - Autoremove unused dependencies
 - Health check with brew doctor

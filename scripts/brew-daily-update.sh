@@ -285,6 +285,41 @@ send_notification() {
 }
 
 ################################################################################
+# NPM Operations
+################################################################################
+
+check_npm_installed() {
+    if ! command -v npm &> /dev/null; then
+        log "npm not found in PATH"
+        return 1
+    fi
+    log "npm found at: $(command -v npm)"
+    return 0
+}
+
+update_npm_global() {
+    if ! check_npm_installed; then
+        return 0
+    fi
+
+    log "Updating global npm packages..."
+    local outdated_list=$(npm outdated -g --parseable --depth=0 2>/dev/null || true)
+    
+    if [ -z "$outdated_list" ]; then
+        log "✓ All global npm packages are up to date"
+        return 0
+    fi
+
+    if npm update -g 2>&1 | tee -a "$LOG_FILE"; then
+        log "✓ Global npm packages updated successfully"
+        return 0
+    else
+        log_error "Failed to update global npm packages"
+        return 1
+    fi
+}
+
+################################################################################
 # Main Execution
 ################################################################################
 
@@ -317,6 +352,9 @@ main() {
     update_homebrew || overall_success=false
     upgrade_formulae || overall_success=false
     upgrade_casks || overall_success=false
+    
+    # NPM updates
+    update_npm_global || overall_success=false
     
     # Cleanup operations (always run)
     cleanup_brew
