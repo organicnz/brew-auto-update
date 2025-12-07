@@ -4,7 +4,7 @@ This document explains all configuration options for Homebrew Auto-Update.
 
 ## Installation-Time Configuration
 
-Set these environment variables **before** running `./install.sh`:
+Set these environment variables **before** running `cargo run --bin install`:
 
 ### Schedule Configuration
 
@@ -56,7 +56,7 @@ export BREW_UPDATE_LOG_RETENTION_DAYS=3
 export BREW_UPDATE_MIN_DISK_SPACE_GB=10
 
 # Install
-./install.sh
+cargo run --release --bin install
 ```
 
 ## Runtime Configuration
@@ -143,7 +143,7 @@ Then reload the agent.
 export BREW_UPDATE_HOUR1=9
 export BREW_UPDATE_HOUR2=9  # Same time = effectively once
 export BREW_UPDATE_HOUR3=9
-./install.sh
+cargo run --release --bin install
 ```
 
 ### Aggressive Updates (Every 4 Hours)
@@ -152,7 +152,7 @@ export BREW_UPDATE_HOUR3=9
 export BREW_UPDATE_HOUR1=6
 export BREW_UPDATE_HOUR2=12
 export BREW_UPDATE_HOUR3=18
-./install.sh
+cargo run --release --bin install
 ```
 
 ### Low Priority (Don't Slow Down System)
@@ -160,14 +160,14 @@ export BREW_UPDATE_HOUR3=18
 ```bash
 export BREW_UPDATE_NICE_LEVEL=19  # Lowest priority
 export BREW_UPDATE_THROTTLE_INTERVAL=600  # 10 min between runs
-./install.sh
+cargo run --release --bin install
 ```
 
 ### Keep More Logs
 
 ```bash
 export BREW_UPDATE_LOG_RETENTION_DAYS=7  # Keep 1 week
-./install.sh
+cargo run --release --bin install
 ```
 
 ## Validation

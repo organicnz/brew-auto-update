@@ -69,8 +69,8 @@ Production-grade automated Homebrew and NPM package management for **macOS only*
 git clone https://github.com/organicnz/brew-auto-update.git
 cd brew-auto-update
 
-# Run the installer (no prompts, fully automatic)
-./install.sh
+# Run the installer
+cargo run --release --bin install
 ```
 
 The installer automatically:
@@ -82,11 +82,10 @@ The installer automatically:
 
 ### Manual Install
 
-1. **Copy the script:**
+1. **Install and Build:**
 ```bash
-mkdir -p ~/Scripts
-cp scripts/brew-daily-update.sh ~/Scripts/
-chmod +x ~/Scripts/brew-daily-update.sh
+cargo run --release --bin install
+# This will compile the Rust binary and install it to ~/Scripts/brew-update
 ```
 
 2. **Install the launchd plist:**
@@ -126,7 +125,7 @@ export BREW_UPDATE_LOG_RETENTION_DAYS=1       # Keep logs for 24 hours
 export BREW_UPDATE_MIN_DISK_SPACE_GB=5        # Minimum free space required
 
 # Then install
-./install.sh
+cargo run --release --bin install
 ```
 
 ### Runtime Variables
@@ -168,7 +167,7 @@ Once installed, the script runs automatically on schedule. No action needed!
 
 ### Manual Run
 ```bash
-~/Scripts/brew-daily-update.sh
+~/Scripts/brew-update
 ```
 
 ### View Logs
@@ -241,7 +240,7 @@ rm -rf ~/Library/Logs/brew-update*
 
 - **macOS 10.14 (Mojave) or later** (required)
 - Homebrew installed ([install here](https://brew.sh))
-- Bash shell (included with macOS)
+- Rust/Cargo installed (for building)
 - Write access to `~/Library/Logs`
 
 > **Note**: This tool is designed exclusively for macOS and uses launchd for scheduling. It will not work on Linux or Windows systems.
@@ -262,8 +261,8 @@ rm -rf ~/Library/Logs/brew-update*
 git clone https://github.com/organicnz/brew-auto-update.git
 cd brew-auto-update
 
-# Setup development tools (lefthook, shellcheck, etc.)
-./scripts/setup-dev.sh
+# Setup development tools (lefthook, rustfmt, clippy)
+cargo run --bin setup
 ```
 
 ### Pre-commit Hooks
@@ -312,3 +311,7 @@ Created for automated Homebrew maintenance on macOS systems.
 
 ### v1.1.0
 - Added global NPM package auto-updates
+
+### v2.0.0
+- Rewrite in Rust for safety and performance
+- Native binary instead of Bash script

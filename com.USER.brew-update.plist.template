@@ -7,8 +7,7 @@
     
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>{{HOME}}/Scripts/brew-daily-update.sh</string>
+        <string>{{HOME}}/Scripts/brew-update</string>
     </array>
     
     <key>StartCalendarInterval</key>

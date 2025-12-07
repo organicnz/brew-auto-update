@@ -4,9 +4,11 @@
 
 ### System Architecture
 
-**Dual Execution Paths:**
+**Dual Execution- macOS with Homebrew installed
+- Rust/Cargo (for building)
 - **Automated**: launchd runs 3x daily (9 AM, 3 PM, 9 PM)
-- **Manual**: Automator app or direct script execution
+- **Manual**: `cargo run --release -- **Manual**: `cargo run --release --bin install` (or direct binary execution)
+)
 
 ### Key Features
 
@@ -51,7 +53,8 @@
 ### Files
 
 ```
-~/Scripts/brew-daily-update.sh          # Main update script
+~/Scripts/brew-update                 # Main update binary
+nary
 ~/Library/LaunchAgents/com.USER.brew-update.plist  # launchd config
 ~/Library/Logs/brew-updates.log         # Main log
 ~/Library/Logs/brew-updates-error.log   # Error log
@@ -68,7 +71,7 @@ launchctl list | grep brew-update
 tail -f ~/Library/Logs/brew-updates.log
 
 # Manual run
-~/Scripts/brew-daily-update.sh
+~/Scripts/brew-update
 
 # Reload schedule
 launchctl unload ~/Library/LaunchAgents/com.USER.brew-update.plist
@@ -120,7 +123,8 @@ launchctl list | grep brew-update
 tail ~/Library/Logs/brew-update-stderr.log
 
 # Verify script permissions
-ls -la ~/Scripts/brew-daily-update.sh
+# Verify binary location
+ls -la ~/Scripts/brew-update
 ```
 
 **If lock file is stuck:**
@@ -137,7 +141,8 @@ launchctl print gui/$(id -u)/com.USER.brew-update | grep next
 ### System Requirements
 
 - macOS with Homebrew installed
-- Bash shell
+- macOS with Homebrew installed
+- Rust/Cargo (for building)
 - launchd (built-in)
 - Write access to ~/Library/Logs
 

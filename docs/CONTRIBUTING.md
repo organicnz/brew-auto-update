@@ -26,11 +26,11 @@ Thank you for your interest in contributing! This document provides guidelines f
    ```bash
    git clone https://github.com/YOUR_USERNAME/brew-auto-update.git
    cd brew-auto-update
-   ./scripts/setup-dev.sh
+   cargo run --bin setup
    ```
 3. Create a feature branch (`git checkout -b feature/amazing-feature`)
 4. Make your changes
-5. Run tests: `scripts/lefthook/test.sh`
+5. Run tests: `cargo test`
 6. Commit (lefthook will run pre-commit checks automatically)
 7. Push to your fork (`git push origin feature/amazing-feature`)
 8. Open a Pull Request
@@ -40,8 +40,8 @@ Thank you for your interest in contributing! This document provides guidelines f
 This project uses [Lefthook](https://github.com/evilmartians/lefthook) for git hooks:
 
 **Pre-commit:**
-- ShellCheck linting
-- Bash syntax validation
+- Code formatting (cargo fmt)
+- Clippy linting
 - Plist template validation
 - Secrets detection
 - Markdown linting
