@@ -34,4 +34,4 @@ pre-push:
   commands:
     # Run full test suite before push
     test:
-      run: scripts/lefthook/test.sh
+      run: cargo test
