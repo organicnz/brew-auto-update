@@ -4,11 +4,44 @@
 
 ### System Architecture
 
-**Dual Execution- macOS with Homebrew installed
-- Rust/Cargo (for building)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         macOS launchd                           │
+│     (System daemon that manages scheduled tasks/services)       │
+│  Config: ~/Library/LaunchAgents/com.USER.brew-update.plist      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ Triggers execution at:
+                              │   • 9:00 AM
+                              │   • 3:00 PM
+                              │   • 9:00 PM
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   ~/Scripts/brew-update                          │
+│                                                                  │
+│  Native Mach-O binary (ARM64 on Apple Silicon, x86_64 on Intel) │
+│  Compiled from Rust source code in src/                         │
+│  582KB standalone executable — no runtime dependencies          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+      ┌───────────────────────┼───────────────────────┐
+      ▼                       ▼                       ▼
+┌────────────┐         ┌────────────┐         ┌────────────┐
+│ Pre-flight │         │   Update   │         │  Cleanup   │
+│   Checks   │         │ Operations │         │ & Notify   │
+├────────────┤         ├────────────┤         ├────────────┤
+│ • Network  │         │ • brew     │         │ • cleanup  │
+│ • Disk     │         │   update   │         │ • logs     │
+│ • Lock     │         │ • formulae │         │ • desktop  │
+│ • Homebrew │         │ • casks    │         │   notif    │
+│            │         │ • npm      │         │            │
+└────────────┘         └────────────┘         └────────────┘
+```
+
+### Execution Modes
+
 - **Automated**: launchd runs 3x daily (9 AM, 3 PM, 9 PM)
-- **Manual**: `cargo run --release -- **Manual**: `cargo run --release --bin install` (or direct binary execution)
-)
+- **Manual**: `~/Scripts/brew-update` or `cargo run --release`
 
 ### Key Features
 

@@ -1,7 +1,7 @@
 # Homebrew Auto-Update
 
 [![macOS](https://img.shields.io/badge/macOS-10.14+-blue.svg)](https://www.apple.com/macos/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](docs/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/Homebrew-required-orange.svg)](https://brew.sh)
 
 Production-grade automated Homebrew and NPM package management for **macOS only**. Runs 3x daily via launchd with intelligent pre-flight checks, differential logging, and graceful error handling.
@@ -59,6 +59,61 @@ Production-grade automated Homebrew and NPM package management for **macOS only*
 - Low priority I/O and CPU
 - Desktop notifications on completion
 - Health checks and summaries
+
+## How It Works
+
+This tool uses **launchd** (macOS's native task scheduler) to run a compiled **Rust binary** on schedule.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         macOS launchd                          │
+│  (reads ~/Library/LaunchAgents/com.USER.brew-update.plist)     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ Executes at 9AM, 3PM, 9PM
+┌─────────────────────────────────────────────────────────────────┐
+│                   ~/Scripts/brew-update                         │
+│              (Native ARM64/x86 Mach-O binary)                   │
+│                   Compiled from Rust source                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+    ┌──────────┐       ┌──────────────┐    ┌───────────┐
+    │ Pre-flight│       │ brew update  │    │   Logs    │
+    │  Checks   │       │ brew upgrade │    │ & Notify  │
+    └──────────┘       └──────────────┘    └───────────┘
+```
+
+### Why launchd (not cron)?
+
+macOS deprecated cron in favor of **launchd**, which offers:
+- **Power-aware scheduling** — skips runs when on battery if configured
+- **Missed run recovery** — runs immediately after wake if a schedule was missed
+- **Better process management** — proper signals, resource limits, sandboxing
+- **Native integration** — works with macOS login/logout seamlessly
+
+### The plist Configuration
+
+The plist file tells launchd when and how to run the binary:
+
+```xml
+<key>ProgramArguments</key>
+<array>
+    <string>/Users/YOUR_USERNAME/Scripts/brew-update</string>
+</array>
+
+<key>StartCalendarInterval</key>
+<array>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+</array>
+```
+
+The binary is **not a script** — it's compiled native machine code (Mach-O ARM64 on Apple Silicon, x86_64 on Intel), making it fast and dependency-free at runtime.
 
 ## Installation
 
@@ -211,8 +266,8 @@ launchctl list | grep brew-update
 # Check for errors
 tail ~/Library/Logs/brew-update-stderr.log
 
-# Verify script permissions
-ls -la ~/Scripts/brew-daily-update.sh
+# Verify binary permissions
+ls -la ~/Scripts/brew-update
 ```
 
 ### Lock file stuck
@@ -232,7 +287,7 @@ launchctl unload ~/Library/LaunchAgents/com.$(whoami).brew-update.plist
 
 # Remove files
 rm ~/Library/LaunchAgents/com.$(whoami).brew-update.plist
-rm ~/Scripts/brew-daily-update.sh
+rm ~/Scripts/brew-update
 rm -rf ~/Library/Logs/brew-update*
 ```
 
