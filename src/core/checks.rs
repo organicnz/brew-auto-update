@@ -1,4 +1,4 @@
-use crate::utils::{self, Config};
+use super::utils::{self, Config};
 use std::process::Command;
 
 pub fn check_network(config: &Config) -> bool {

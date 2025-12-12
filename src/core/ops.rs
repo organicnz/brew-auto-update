@@ -1,0 +1,627 @@
+use super::{
+    stats::CaskStats,
+    utils::{self, Config},
+};
+use std::process::Command;
+
+pub fn check_brew(config: &Config) -> bool {
+    if Command::new("which")
+        .arg("brew")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    // Check common paths
+    let paths = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"];
+    for path in paths {
+        if std::path::Path::new(path).exists() {
+            return true;
+        }
+    }
+
+    utils::log_error("Homebrew not found", config);
+    false
+}
+
+pub fn update_homebrew(config: &Config) -> bool {
+    utils::log("Updating Homebrew...", config);
+    match Command::new("brew").arg("update").status() {
+        Ok(status) if status.success() => {
+            utils::log("✓ Homebrew updated successfully", config);
+            true
+        }
+        _ => {
+            utils::log_error("Failed to update Homebrew", config);
+            false
+        }
+    }
+}
+
+pub fn upgrade_formulae(config: &Config) -> bool {
+    utils::log("Checking for outdated formulae...", config);
+
+    // Count outdated
+    let outdated_count = Command::new("brew")
+        .args(["outdated", "--formula"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+        .unwrap_or(0);
+
+    if outdated_count == 0 {
+        utils::log("✓ All formulae are up to date", config);
+        return true;
+    }
+
+    utils::log(&format!("Upgrading {} formulae...", outdated_count), config);
+    match Command::new("brew").args(["upgrade", "--formula"]).status() {
+        Ok(status) if status.success() => {
+            utils::log("✓ Formulae upgraded successfully", config);
+            true
+        }
+        _ => {
+            utils::log_error("Failed to upgrade formulae", config);
+            false
+        }
+    }
+}
+
+pub fn upgrade_casks(config: &Config) -> CaskStats {
+    utils::log("Checking for outdated casks...", config);
+
+    let mut stats = CaskStats::default();
+
+    // Get list of outdated casks
+    let outdated_output = Command::new("brew")
+        .args(["outdated", "--cask", "--greedy"])
+        .output();
+
+    let outdated_casks: Vec<String> = match outdated_output {
+        Ok(output) => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|s| s.to_string())
+            .collect(),
+        Err(_) => {
+            utils::log("⚠ Could not check cask status, skipping", config);
+            return stats;
+        }
+    };
+
+    if outdated_casks.is_empty() {
+        utils::log("✓ All casks are up to date", config);
+        return stats;
+    }
+
+    utils::log(
+        &format!(
+            "Found {} outdated casks, upgrading...",
+            outdated_casks.len()
+        ),
+        config,
+    );
+
+    for cask in &outdated_casks {
+        // Extract just the cask name (first word before any spaces)
+        let cask_name = cask.split_whitespace().next().unwrap_or(cask);
+
+        match Command::new("brew")
+            .args(["upgrade", "--cask", cask_name])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                stats.upgraded += 1;
+                utils::log(&format!("✓ Upgraded {}", cask_name), config);
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr_lower = stderr.to_lowercase();
+
+                // Categorize the skip reason
+                if stderr_lower.contains("installer manual")
+                    || stderr_lower.contains("manual installer")
+                {
+                    stats.skipped_manual.push(cask_name.to_string());
+                    utils::log(
+                        &format!("⚠ Skipped {}: Manual installer required", cask_name),
+                        config,
+                    );
+                } else if stderr_lower.contains("is running")
+                    || stderr_lower.contains("app is open")
+                {
+                    stats.skipped_running.push(cask_name.to_string());
+                    utils::log(
+                        &format!("⚠ Skipped {}: App is currently running", cask_name),
+                        config,
+                    );
+                } else if stderr_lower.contains("authentication")
+                    || stderr_lower.contains("password")
+                    || stderr_lower.contains("disabled because it requires authentication")
+                {
+                    stats.skipped_auth.push(cask_name.to_string());
+                    utils::log(
+                        &format!("⚠ Skipped {}: Requires authentication", cask_name),
+                        config,
+                    );
+                } else if stderr_lower.contains("definition is invalid")
+                    || stderr_lower.contains("conflicts_with")
+                {
+                    stats.skipped_invalid.push(cask_name.to_string());
+                    utils::log(
+                        &format!("⚠ Skipped {}: Invalid cask definition", cask_name),
+                        config,
+                    );
+                } else if stderr_lower.contains("app source")
+                    || stderr_lower.contains("is not there")
+                    || stderr_lower.contains("already an app at")
+                {
+                    stats.skipped_source_missing.push(cask_name.to_string());
+
+                    // Try with --force flag for source issues
+                    utils::log(
+                        &format!(
+                            "⚠ Skipped {}: App source issue, retrying with --force...",
+                            cask_name
+                        ),
+                        config,
+                    );
+                    match Command::new("brew")
+                        .args(["upgrade", "--cask", "--force", cask_name])
+                        .output()
+                    {
+                        Ok(retry_output) if retry_output.status.success() => {
+                            stats.upgraded += 1;
+                            stats.skipped_source_missing.pop(); // Remove from skipped list
+                            utils::log(&format!("✓ Force-upgraded {}", cask_name), config);
+                        }
+                        _ => {
+                            utils::log(
+                                &format!("  → Force upgrade also failed for {}", cask_name),
+                                config,
+                            );
+                        }
+                    }
+                } else {
+                    // Truncate long error messages
+                    let short_reason = if stderr.trim().len() > 100 {
+                        format!("{}...", &stderr.trim()[0..100])
+                    } else {
+                        stderr.trim().to_string()
+                    };
+
+                    stats.skipped_other.push(cask_name.to_string());
+                    utils::log(
+                        &format!("⚠ Skipped {}: {}", cask_name, short_reason),
+                        config,
+                    );
+                }
+            }
+            Err(e) => {
+                stats.skipped_other.push(cask_name.to_string());
+                utils::log(
+                    &format!("⚠ Skipped {}: Failed to execute brew ({})", cask_name, e),
+                    config,
+                );
+            }
+        }
+    }
+
+    let total_skipped = stats.total_skipped();
+    if total_skipped > 0 {
+        utils::log(
+            &format!(
+                "✓ Casks: {} upgraded, {} skipped",
+                stats.upgraded, total_skipped
+            ),
+            config,
+        );
+    } else {
+        utils::log(
+            &format!("✓ All {} casks upgraded successfully", stats.upgraded),
+            config,
+        );
+    }
+
+    stats
+}
+
+// ============================================================================
+// HOUSEKEEPING FUNCTIONS
+// ============================================================================
+
+/// Statistics from housekeeping operations
+#[derive(Debug, Default)]
+pub struct HousekeepingStats {
+    pub cache_cleared_bytes: u64,
+    pub deps_removed: usize,
+    pub logs_rotated: usize,
+    pub locks_cleared: usize,
+    pub brew_healthy: bool,
+    pub doctor_warnings: usize,
+    pub disk_available: String,
+}
+
+impl std::fmt::Display for HousekeepingStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Cache: {}MB freed, Deps removed: {}, Logs rotated: {}",
+            self.cache_cleared_bytes / 1_000_000,
+            self.deps_removed,
+            self.logs_rotated
+        )
+    }
+}
+
+/// Pre-task housekeeping - cleanup and prepare the system
+pub fn pre_housekeeping(config: &Config) -> HousekeepingStats {
+    utils::log("📋 Running pre-task housekeeping...", config);
+    let mut stats = HousekeepingStats::default();
+
+    // 1. Clear Homebrew cache to free space
+    utils::log("  Clearing Homebrew cache...", config);
+    if let Ok(output) = Command::new("brew")
+        .args(["cleanup", "--prune=30", "-s"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(bytes) = parse_bytes_freed(&stdout) {
+                stats.cache_cleared_bytes = bytes;
+            }
+        }
+    }
+
+    // 2. Remove unused dependencies
+    utils::log("  Removing unused dependencies...", config);
+    if let Ok(output) = Command::new("brew").arg("autoremove").output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stats.deps_removed = stdout
+                .lines()
+                .filter(|l| l.starts_with("==> Uninstalling"))
+                .count();
+        }
+    }
+
+    // 3. Check Homebrew health
+    utils::log("  Checking Homebrew health...", config);
+    if let Ok(output) = Command::new("brew").args(["doctor", "--quiet"]).output() {
+        stats.doctor_warnings = String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count();
+        stats.brew_healthy = output.status.success();
+        if !stats.brew_healthy {
+            utils::log(
+                "  ⚠ brew doctor found issues (run 'brew doctor' for details)",
+                config,
+            );
+        }
+    }
+
+    // 4. Clean NPM cache
+    utils::log("  Cleaning NPM cache...", config);
+    let _ = Command::new("npm")
+        .args(["cache", "clean", "--force"])
+        .output();
+
+    // Log summary
+    if stats.cache_cleared_bytes > 0 || stats.deps_removed > 0 {
+        utils::log(
+            &format!(
+                "  ✓ Pre-housekeeping: freed ~{}MB, removed {} unused deps",
+                stats.cache_cleared_bytes / 1_000_000,
+                stats.deps_removed
+            ),
+            config,
+        );
+    } else {
+        utils::log("  ✓ Pre-housekeeping completed (system was clean)", config);
+    }
+
+    stats
+}
+
+/// Post-task housekeeping - thorough cleanup after updates
+pub fn post_housekeeping(config: &Config) -> HousekeepingStats {
+    utils::log("📋 Running post-task housekeeping...", config);
+    let mut stats = HousekeepingStats::default();
+
+    // 1. Aggressive cache cleanup (older files)
+    utils::log("  Deep cleaning Homebrew cache...", config);
+    if let Ok(output) = Command::new("brew")
+        .args(["cleanup", "--prune=7", "-s"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(bytes) = parse_bytes_freed(&stdout) {
+                stats.cache_cleared_bytes = bytes;
+            }
+        }
+    }
+
+    // 2. Remove unused dependencies again (updates may have orphaned some)
+    utils::log("  Removing newly orphaned dependencies...", config);
+    if let Ok(output) = Command::new("brew").arg("autoremove").output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stats.deps_removed = stdout
+                .lines()
+                .filter(|l| l.starts_with("==> Uninstalling"))
+                .count();
+        }
+    }
+
+    // 3. Clear download caches
+    utils::log("  Clearing download caches...", config);
+    clear_download_caches(&mut stats);
+
+    // 4. Remove stale lock files
+    utils::log("  Removing stale lock files...", config);
+    clear_stale_locks(&mut stats);
+
+    // 5. Clear old logs (keep last 7 days)
+    utils::log("  Rotating old logs...", config);
+    rotate_logs(config, &mut stats);
+
+    // 6. Run garbage collection on Homebrew git repos
+    utils::log("  Optimizing Homebrew repos...", config);
+    let _ = Command::new("brew")
+        .args(["update", "--auto-update"])
+        .output();
+
+    // Report final disk space
+    if let Ok(output) = Command::new("df").args(["-h", "/"]).output() {
+        let df_output = String::from_utf8_lossy(&output.stdout);
+        for line in df_output.lines().skip(1) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                stats.disk_available = parts[3].to_string();
+            }
+        }
+    }
+
+    // Log summary
+    utils::log(
+        &format!(
+            "  ✓ Post-housekeeping completed. Disk available: {}",
+            if stats.disk_available.is_empty() {
+                "unknown"
+            } else {
+                &stats.disk_available
+            }
+        ),
+        config,
+    );
+
+    stats
+}
+
+/// Simple cleanup (for backward compatibility)
+pub fn cleanup_brew(config: &Config) {
+    utils::log("Running cleanup...", config);
+    let _ = Command::new("brew")
+        .args(["cleanup", "--prune=30", "-s"])
+        .status();
+    let _ = Command::new("brew").arg("autoremove").status();
+    utils::log("✓ Cleanup completed", config);
+}
+
+fn parse_bytes_freed(output: &str) -> Option<u64> {
+    for line in output.lines() {
+        if line.contains("freed") || line.contains("Removing") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            for part in parts {
+                if part.ends_with("GB") || part.ends_with("MB") || part.ends_with("KB") {
+                    let num_str = part.trim_end_matches(|c: char| c.is_alphabetic());
+                    if let Ok(num) = num_str.parse::<f64>() {
+                        if part.ends_with("GB") {
+                            return Some((num * 1_000_000_000.0) as u64);
+                        } else if part.ends_with("MB") {
+                            return Some((num * 1_000_000.0) as u64);
+                        } else if part.ends_with("KB") {
+                            return Some((num * 1_000.0) as u64);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn clear_download_caches(stats: &mut HousekeepingStats) {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if home.is_empty() {
+        return;
+    }
+
+    let cache_dir = format!("{}/Library/Caches/Homebrew/downloads", home);
+    if std::path::Path::new(&cache_dir).exists() {
+        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(elapsed) = modified.elapsed() {
+                            if elapsed.as_secs() > 7 * 24 * 60 * 60 {
+                                let _ = std::fs::remove_file(entry.path());
+                                stats.cache_cleared_bytes += metadata.len();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn clear_stale_locks(stats: &mut HousekeepingStats) {
+    let temp_path = std::path::Path::new("/tmp");
+    if let Ok(entries) = std::fs::read_dir(temp_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if (name.starts_with("homebrew") || name.starts_with("brew-"))
+                && name.ends_with(".lock")
+            {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(elapsed) = modified.elapsed() {
+                            if elapsed.as_secs() > 3600 {
+                                let _ = std::fs::remove_file(entry.path());
+                                stats.locks_cleared += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn rotate_logs(config: &Config, stats: &mut HousekeepingStats) {
+    if let Some(log_dir) = config.log_file.parent() {
+        if let Ok(entries) = std::fs::read_dir(log_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("brew-update") && name.ends_with(".log.old") {
+                    if let Ok(metadata) = entry.metadata() {
+                        if let Ok(modified) = metadata.modified() {
+                            if let Ok(elapsed) = modified.elapsed() {
+                                if elapsed.as_secs() > 7 * 24 * 60 * 60 {
+                                    let _ = std::fs::remove_file(entry.path());
+                                    stats.logs_rotated += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// NPM UPDATE FUNCTION
+// ============================================================================
+
+pub fn update_npm(config: &Config) -> (bool, Vec<String>) {
+    let mut invalid_packages = Vec::new();
+
+    // Check if npm exists
+    let npm_exists = Command::new("which")
+        .arg("npm")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !npm_exists {
+        utils::log(
+            "ℹ npm not installed, skipping global package updates",
+            config,
+        );
+        return (true, invalid_packages);
+    }
+
+    utils::log("Checking global npm packages...", config);
+
+    // Check for invalid package names first
+    match Command::new("npm")
+        .args(["list", "-g", "--depth=0", "--json"])
+        .output()
+    {
+        Ok(output) => {
+            let list_output = String::from_utf8_lossy(&output.stdout);
+            // Look for packages that start with a period (invalid)
+            for line in list_output.lines() {
+                if line.contains("\"@") && line.contains("/.") {
+                    // Extract package name
+                    if let Some(pkg_start) = line.find("\"@") {
+                        if let Some(pkg_end) = line[pkg_start + 1..].find("\"") {
+                            let pkg_name = &line[pkg_start + 1..pkg_start + 1 + pkg_end];
+                            if pkg_name.contains("/.") {
+                                invalid_packages.push(pkg_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !invalid_packages.is_empty() {
+                utils::log(
+                    &format!("⚠ Found {} invalid npm packages:", invalid_packages.len()),
+                    config,
+                );
+                for pkg in &invalid_packages {
+                    utils::log(&format!("  - {}", pkg), config);
+                }
+                utils::log(
+                    "  → Run 'npm uninstall -g <package>' to remove these",
+                    config,
+                );
+            }
+        }
+        Err(_) => {
+            utils::log("⚠ Could not check npm package list", config);
+        }
+    }
+
+    // Check for outdated packages
+    let outdated = Command::new("npm")
+        .args(["outdated", "-g", "--json"])
+        .output();
+
+    let has_outdated = match &outdated {
+        Ok(out) => {
+            // npm outdated returns exit code 1 when packages are outdated
+            // and outputs JSON with the outdated packages
+            !out.stdout.is_empty() && String::from_utf8_lossy(&out.stdout).trim() != "{}"
+        }
+        Err(_) => false,
+    };
+
+    if !has_outdated {
+        utils::log("✓ All global npm packages are up to date", config);
+        return (true, invalid_packages);
+    }
+
+    utils::log("Updating global npm packages...", config);
+
+    match Command::new("npm").args(["update", "-g"]).output() {
+        Ok(output) if output.status.success() => {
+            utils::log("✓ Global npm packages updated successfully", config);
+            (true, invalid_packages)
+        }
+        Ok(output) => {
+            // Check if it's a permission error
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("EACCES") || stderr.contains("permission") {
+                utils::log(
+                    "⚠ npm update skipped: requires elevated permissions",
+                    config,
+                );
+            } else if stderr.contains("EINVALIDPACKAGENAME") {
+                utils::log(
+                    "⚠ npm update completed with warnings (invalid package names detected above)",
+                    config,
+                );
+            } else {
+                utils::log("⚠ npm update completed with warnings:", config);
+                for line in stderr.lines().take(5) {
+                    utils::log(&format!("  > {}", line), config);
+                }
+            }
+            // Don't fail overall - npm issues are non-critical
+            (true, invalid_packages)
+        }
+        Err(e) => {
+            utils::log(
+                &format!("⚠ npm update skipped: command execution failed ({})", e),
+                config,
+            );
+            (true, invalid_packages)
+        }
+    }
+}

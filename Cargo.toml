@@ -1,7 +1,26 @@
 [package]
 name = "brew-auto-update"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Automated Homebrew and NPM package management for macOS"
+repository = "https://github.com/organicnz/brew-auto-update"
+license = "MIT"
+
+[[bin]]
+name = "brew-auto-update"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "install"
+path = "src/bin/install.rs"
+
+[[bin]]
+name = "setup"
+path = "src/bin/setup.rs"
+
+[[bin]]
+name = "audit"
+path = "src/bin/audit.rs"
 
 [dependencies]
 chrono = "0.4"

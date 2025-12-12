@@ -52,7 +52,7 @@ fn main() {
     fs::copy(&target_bin, &dest_bin).expect("Failed to copy binary");
 
     // Read Plist Template
-    let template_content = fs::read_to_string("com.USER.brew-update.plist.template")
+    let template_content = fs::read_to_string("config/com.USER.brew-update.plist.template")
         .expect("Failed to read plist template");
 
     // Replace Placeholders

@@ -17,7 +17,7 @@ pre-commit:
     
     # Validate plist template
     plist-check:
-      glob: "*.plist.template"
+      glob: "config/*.plist.template"
       run: cargo run -q --bin audit -- plist {staged_files}
     
     # Check for secrets/tokens
