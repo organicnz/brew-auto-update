@@ -66,12 +66,116 @@ fn remove_quarantine(app_path: &str, config: &Config) {
     }
 }
 
+/// Remove quarantine attribute from ALL installed cask apps
+/// This prevents Gatekeeper "Apple could not verify" warnings
+pub fn remove_all_quarantine(config: &Config) -> usize {
+    utils::log("🔓 Removing quarantine from all cask apps...", config);
+
+    // Get list of all installed casks
+    let output = match Command::new("brew").args(["list", "--cask"]).output() {
+        Ok(o) => o,
+        Err(_) => {
+            utils::log("  ⚠ Could not list installed casks", config);
+            return 0;
+        }
+    };
+
+    let casks: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+
+    if casks.is_empty() {
+        utils::log("  ℹ No casks installed", config);
+        return 0;
+    }
+
+    let mut count = 0;
+    for cask in &casks {
+        if let Some(app_path) = get_cask_app_path(cask) {
+            if std::path::Path::new(&app_path).exists() {
+                // Check if app has quarantine attribute before removing
+                let has_quarantine = Command::new("xattr")
+                    .args(["-l", &app_path])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).contains("com.apple.quarantine"))
+                    .unwrap_or(false);
+
+                if has_quarantine {
+                    match Command::new("xattr")
+                        .args(["-dr", "com.apple.quarantine", &app_path])
+                        .output()
+                    {
+                        Ok(o) if o.status.success() => {
+                            utils::log(&format!("  ✓ {}", app_path), config);
+                            count += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    if count > 0 {
+        utils::log(&format!("✓ Removed quarantine from {} apps", count), config);
+    } else {
+        utils::log("✓ No quarantine attributes found", config);
+    }
+
+    count
+}
+
+/// Attempt to recover an app that was disrupted during a failed upgrade
+fn attempt_recovery(cask_name: &str, original_app_path: Option<&str>, config: &Config) -> bool {
+    // Check if the app no longer exists (was moved during upgrade)
+    if let Some(path) = original_app_path {
+        if !std::path::Path::new(path).exists() {
+            utils::log(
+                &format!(
+                    "  ⚠ {} was removed during upgrade, attempting recovery...",
+                    path
+                ),
+                config,
+            );
+
+            // Try to reinstall the cask to restore the app
+            match Command::new("brew")
+                .args(["reinstall", "--cask", cask_name])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    utils::log(
+                        &format!("  ✓ Recovered {} via reinstall", cask_name),
+                        config,
+                    );
+                    // Remove quarantine from recovered app
+                    if let Some(new_path) = get_cask_app_path(cask_name) {
+                        remove_quarantine(&new_path, config);
+                    }
+                    return true;
+                }
+                _ => {
+                    utils::log(
+                        &format!(
+                            "  ✗ Failed to recover {}. Manual reinstall required: brew reinstall --cask {}",
+                            cask_name, cask_name
+                        ),
+                        config,
+                    );
+                }
+            }
+        }
+    }
+    false
+}
+
 // ============================================================================
 // TIMEOUT HELPER
 // ============================================================================
 
-/// Maximum time to wait for a single cask upgrade (10 minutes)
-const CASK_UPGRADE_TIMEOUT_SECS: u64 = 600;
+/// Maximum time to wait for a single cask upgrade (30 minutes)
+const CASK_UPGRADE_TIMEOUT_SECS: u64 = 1800;
 
 /// Run a command with a timeout, returning the output or an error
 fn run_with_timeout(cmd: &mut Command, timeout_secs: u64) -> Result<Output, String> {
@@ -212,6 +316,9 @@ pub fn upgrade_casks(config: &Config) -> CaskStats {
         // Extract just the cask name (first word before any spaces)
         let cask_name = cask.split_whitespace().next().unwrap_or(cask);
 
+        // Capture app path BEFORE upgrade to detect disruption if upgrade fails
+        let original_app_path = get_cask_app_path(cask_name);
+
         // Log progress before starting the upgrade
         utils::log(&format!("  Upgrading {}...", cask_name), config);
 
@@ -228,14 +335,24 @@ pub fn upgrade_casks(config: &Config) -> CaskStats {
                 }
             }
             Err(e) if e.contains("Timeout") => {
-                stats.skipped_timeout.push(cask_name.to_string());
+                // Attempt recovery if app was disrupted during timed-out upgrade
+                if attempt_recovery(cask_name, original_app_path.as_deref(), config) {
+                    stats.recovered += 1;
+                } else {
+                    stats.skipped_timeout.push(cask_name.to_string());
+                }
                 utils::log(
-                    &format!("⏱ Skipped {}: Upgrade timed out (>10min)", cask_name),
+                    &format!("⏱ Skipped {}: Upgrade timed out (>30min)", cask_name),
                     config,
                 );
             }
             Err(e) => {
-                stats.skipped_other.push(cask_name.to_string());
+                // Attempt recovery if app was disrupted during failed upgrade
+                if attempt_recovery(cask_name, original_app_path.as_deref(), config) {
+                    stats.recovered += 1;
+                } else {
+                    stats.skipped_other.push(cask_name.to_string());
+                }
                 utils::log(&format!("⚠ Skipped {}: {}", cask_name, e), config);
             }
             Ok(output) => {

@@ -16,6 +16,7 @@ pub struct ComponentStats {
 #[derive(Debug, Default)]
 pub struct CaskStats {
     pub upgraded: usize,
+    pub recovered: usize,
     pub skipped_manual: Vec<String>,
     pub skipped_running: Vec<String>,
     pub skipped_auth: Vec<String>,
@@ -52,12 +53,21 @@ impl fmt::Display for UpdateStats {
         }
 
         // Casks
-        writeln!(
-            f,
-            "Casks:    {} upgraded, {} skipped",
-            self.casks.upgraded,
-            self.casks.total_skipped()
-        )?;
+        let cask_summary = if self.casks.recovered > 0 {
+            format!(
+                "Casks:    {} upgraded, {} recovered, {} skipped",
+                self.casks.upgraded,
+                self.casks.recovered,
+                self.casks.total_skipped()
+            )
+        } else {
+            format!(
+                "Casks:    {} upgraded, {} skipped",
+                self.casks.upgraded,
+                self.casks.total_skipped()
+            )
+        };
+        writeln!(f, "{}", cask_summary)?;
 
         if !self.casks.skipped_running.is_empty() {
             writeln!(

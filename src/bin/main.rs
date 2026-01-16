@@ -102,6 +102,10 @@ fn main() {
     // Upgrade Casks (with detailed stats)
     update_stats.casks = ops::upgrade_casks(&config);
 
+    // Remove quarantine from ALL cask apps to prevent Gatekeeper warnings
+    log("\n", &config);
+    ops::remove_all_quarantine(&config);
+
     // Update NPM (with invalid package detection)
     let (npm_success, invalid_npm_packages) = ops::update_npm(&config);
     if !npm_success {
@@ -173,16 +177,6 @@ fn main() {
             &format!(
                 "   Cargo: {}MB",
                 (pre_cleanup_stats.cargo_cache_freed + post_cleanup_stats.cargo_cache_freed)
-                    / 1_000_000
-            ),
-            &config,
-        );
-    }
-    if pre_cleanup_stats.pip_cache_freed + post_cleanup_stats.pip_cache_freed > 0 {
-        log(
-            &format!(
-                "   Pip: {}MB",
-                (pre_cleanup_stats.pip_cache_freed + post_cleanup_stats.pip_cache_freed)
                     / 1_000_000
             ),
             &config,

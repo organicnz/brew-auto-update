@@ -1,5 +1,5 @@
 //! Comprehensive cleanup module for development environments
-//! Handles Homebrew, NPM, Cargo, Pip, and system caches
+//! Handles Homebrew, NPM, Cargo, and system caches
 
 use super::utils::{self, Config};
 use std::path::Path;
@@ -15,7 +15,6 @@ pub struct CleanupStats {
     pub brew_cache_freed: u64,
     pub npm_cache_freed: u64,
     pub cargo_cache_freed: u64,
-    pub pip_cache_freed: u64,
     pub system_cache_freed: u64,
     pub logs_cleaned: usize,
     pub locks_removed: usize,
@@ -41,9 +40,6 @@ impl std::fmt::Display for CleanupStats {
         }
         if self.cargo_cache_freed > 0 {
             writeln!(f, "   Cargo: {}MB", self.cargo_cache_freed / 1_000_000)?;
-        }
-        if self.pip_cache_freed > 0 {
-            writeln!(f, "   Pip: {}MB", self.pip_cache_freed / 1_000_000)?;
         }
         if self.system_cache_freed > 0 {
             writeln!(f, "   System: {}MB", self.system_cache_freed / 1_000_000)?;
@@ -72,7 +68,6 @@ pub fn comprehensive_cleanup(config: &Config, aggressive: bool) -> CleanupStats 
     cleanup_homebrew(config, &mut stats, aggressive);
     cleanup_npm(config, &mut stats, &home);
     cleanup_cargo(config, &mut stats, &home);
-    cleanup_pip(config, &mut stats, &home);
     cleanup_system_caches(config, &mut stats, &home, aggressive);
     cleanup_dev_caches(config, &mut stats, &home);
     cleanup_old_logs(config, &mut stats, &home);
@@ -82,7 +77,6 @@ pub fn comprehensive_cleanup(config: &Config, aggressive: bool) -> CleanupStats 
     stats.bytes_freed = stats.brew_cache_freed
         + stats.npm_cache_freed
         + stats.cargo_cache_freed
-        + stats.pip_cache_freed
         + stats.system_cache_freed;
 
     utils::log(
@@ -191,36 +185,6 @@ fn cleanup_cargo(config: &Config, stats: &mut CleanupStats, home: &str) {
     let git_checkouts = format!("{}/.cargo/git/checkouts", home);
     let freed = clean_old_files(&git_checkouts, 30, stats);
     stats.cargo_cache_freed += freed;
-}
-
-fn cleanup_pip(config: &Config, stats: &mut CleanupStats, home: &str) {
-    utils::log("  🐍 Cleaning Pip...", config);
-
-    if !command_exists("pip3") && !command_exists("pip") {
-        return;
-    }
-
-    let pip_cmd = if command_exists("pip3") {
-        "pip3"
-    } else {
-        "pip"
-    };
-    let _ = Command::new(pip_cmd).args(["cache", "purge"]).output();
-
-    let pip_caches = [
-        format!("{}/Library/Caches/pip", home),
-        format!("{}/.cache/pip", home),
-    ];
-
-    for cache in &pip_caches {
-        let freed = clean_old_files(cache, 14, stats);
-        stats.pip_cache_freed += freed;
-    }
-
-    let pycache_locations = [format!("{}/.local/lib", home)];
-    for loc in &pycache_locations {
-        clean_pycache_dirs(loc, stats);
-    }
 }
 
 fn cleanup_system_caches(config: &Config, stats: &mut CleanupStats, home: &str, aggressive: bool) {
@@ -541,27 +505,6 @@ fn clean_old_log_files(dir: &str, max_age_days: u64, stats: &mut CleanupStats) {
                                 }
                             }
                         }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn clean_pycache_dirs(dir: &str, stats: &mut CleanupStats) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            if let Ok(metadata) = entry.metadata() {
-                if metadata.is_dir() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name == "__pycache__" {
-                        let size = get_dir_size(&entry.path().to_string_lossy());
-                        if std::fs::remove_dir_all(entry.path()).is_ok() {
-                            stats.pip_cache_freed += size;
-                            stats.dirs_removed += 1;
-                        }
-                    } else {
-                        clean_pycache_dirs(&entry.path().to_string_lossy(), stats);
                     }
                 }
             }
