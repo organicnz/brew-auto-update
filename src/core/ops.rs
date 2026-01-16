@@ -2,7 +2,113 @@ use super::{
     stats::CaskStats,
     utils::{self, Config},
 };
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
+use wait_timeout::ChildExt;
+
+// ============================================================================
+// QUARANTINE REMOVAL HELPERS
+// ============================================================================
+
+/// Get the application path for a cask by querying brew info
+fn get_cask_app_path(cask_name: &str) -> Option<String> {
+    let output = Command::new("brew")
+        .args(["info", "--cask", cask_name, "--json=v2"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the JSON to find app artifacts
+    // Looking for: "artifacts": [{"app": ["AppName.app"]}]
+    // Simple parsing without serde - look for "app": ["Something.app"]
+    if let Some(app_start) = json_str.find("\"app\"") {
+        let remainder = &json_str[app_start..];
+        if let Some(bracket_start) = remainder.find('[') {
+            let after_bracket = &remainder[bracket_start + 1..];
+            if let Some(quote_start) = after_bracket.find('"') {
+                let after_quote = &after_bracket[quote_start + 1..];
+                if let Some(quote_end) = after_quote.find('"') {
+                    let app_name = &after_quote[..quote_end];
+                    if app_name.ends_with(".app") {
+                        return Some(format!("/Applications/{}", app_name));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Remove quarantine attribute from an application
+fn remove_quarantine(app_path: &str, config: &Config) {
+    // Verify the path exists before attempting to remove quarantine
+    if !std::path::Path::new(app_path).exists() {
+        return;
+    }
+
+    match Command::new("xattr")
+        .args(["-dr", "com.apple.quarantine", app_path])
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            utils::log(&format!("  ✓ Removed quarantine from {}", app_path), config);
+        }
+        _ => {
+            // Silently ignore - quarantine may not exist or path may not be accessible
+        }
+    }
+}
+
+// ============================================================================
+// TIMEOUT HELPER
+// ============================================================================
+
+/// Maximum time to wait for a single cask upgrade (10 minutes)
+const CASK_UPGRADE_TIMEOUT_SECS: u64 = 600;
+
+/// Run a command with a timeout, returning the output or an error
+fn run_with_timeout(cmd: &mut Command, timeout_secs: u64) -> Result<Output, String> {
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn: {}", e))?;
+
+    match child.wait_timeout(Duration::from_secs(timeout_secs)) {
+        Ok(Some(status)) => {
+            // Process completed within timeout
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+
+            if let Some(mut stdout_handle) = child.stdout.take() {
+                stdout_handle.read_to_end(&mut stdout).ok();
+            }
+            if let Some(mut stderr_handle) = child.stderr.take() {
+                stderr_handle.read_to_end(&mut stderr).ok();
+            }
+
+            Ok(Output {
+                status,
+                stdout,
+                stderr,
+            })
+        }
+        Ok(None) => {
+            // Timeout exceeded - kill the process
+            child.kill().ok();
+            child.wait().ok(); // Reap the zombie process
+            Err("Timeout exceeded".to_string())
+        }
+        Err(e) => Err(format!("Wait error: {}", e)),
+    }
+}
 
 pub fn check_brew(config: &Config) -> bool {
     if Command::new("which")
@@ -106,13 +212,31 @@ pub fn upgrade_casks(config: &Config) -> CaskStats {
         // Extract just the cask name (first word before any spaces)
         let cask_name = cask.split_whitespace().next().unwrap_or(cask);
 
-        match Command::new("brew")
-            .args(["upgrade", "--cask", cask_name])
-            .output()
-        {
+        // Log progress before starting the upgrade
+        utils::log(&format!("  Upgrading {}...", cask_name), config);
+
+        match run_with_timeout(
+            Command::new("brew").args(["upgrade", "--cask", cask_name]),
+            CASK_UPGRADE_TIMEOUT_SECS,
+        ) {
             Ok(output) if output.status.success() => {
                 stats.upgraded += 1;
                 utils::log(&format!("✓ Upgraded {}", cask_name), config);
+                // Remove quarantine attribute to prevent Gatekeeper warnings
+                if let Some(app_path) = get_cask_app_path(cask_name) {
+                    remove_quarantine(&app_path, config);
+                }
+            }
+            Err(e) if e.contains("Timeout") => {
+                stats.skipped_timeout.push(cask_name.to_string());
+                utils::log(
+                    &format!("⏱ Skipped {}: Upgrade timed out (>10min)", cask_name),
+                    config,
+                );
+            }
+            Err(e) => {
+                stats.skipped_other.push(cask_name.to_string());
+                utils::log(&format!("⚠ Skipped {}: {}", cask_name, e), config);
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -166,14 +290,26 @@ pub fn upgrade_casks(config: &Config) -> CaskStats {
                         ),
                         config,
                     );
-                    match Command::new("brew")
-                        .args(["upgrade", "--cask", "--force", cask_name])
-                        .output()
-                    {
+                    match run_with_timeout(
+                        Command::new("brew").args(["upgrade", "--cask", "--force", cask_name]),
+                        CASK_UPGRADE_TIMEOUT_SECS,
+                    ) {
                         Ok(retry_output) if retry_output.status.success() => {
                             stats.upgraded += 1;
                             stats.skipped_source_missing.pop(); // Remove from skipped list
                             utils::log(&format!("✓ Force-upgraded {}", cask_name), config);
+                            // Remove quarantine attribute to prevent Gatekeeper warnings
+                            if let Some(app_path) = get_cask_app_path(cask_name) {
+                                remove_quarantine(&app_path, config);
+                            }
+                        }
+                        Err(e) if e.contains("Timeout") => {
+                            stats.skipped_source_missing.pop();
+                            stats.skipped_timeout.push(cask_name.to_string());
+                            utils::log(
+                                &format!("  → Force upgrade timed out for {}", cask_name),
+                                config,
+                            );
                         }
                         _ => {
                             utils::log(
@@ -196,13 +332,6 @@ pub fn upgrade_casks(config: &Config) -> CaskStats {
                         config,
                     );
                 }
-            }
-            Err(e) => {
-                stats.skipped_other.push(cask_name.to_string());
-                utils::log(
-                    &format!("⚠ Skipped {}: Failed to execute brew ({})", cask_name, e),
-                    config,
-                );
             }
         }
     }

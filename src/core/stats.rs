@@ -21,6 +21,7 @@ pub struct CaskStats {
     pub skipped_auth: Vec<String>,
     pub skipped_invalid: Vec<String>,
     pub skipped_source_missing: Vec<String>,
+    pub skipped_timeout: Vec<String>,
     pub skipped_other: Vec<String>,
 }
 
@@ -31,6 +32,7 @@ impl CaskStats {
             + self.skipped_auth.len()
             + self.skipped_invalid.len()
             + self.skipped_source_missing.len()
+            + self.skipped_timeout.len()
             + self.skipped_other.len()
     }
 
@@ -103,6 +105,14 @@ impl fmt::Display for UpdateStats {
                 writeln!(f, "    - {}", app)?;
             }
             writeln!(f, "    → Apps may be in non-standard locations")?;
+        }
+
+        if !self.casks.skipped_timeout.is_empty() {
+            writeln!(f, "  ⏱ Timed out ({}):", self.casks.skipped_timeout.len())?;
+            for app in &self.casks.skipped_timeout {
+                writeln!(f, "    - {}", app)?;
+            }
+            writeln!(f, "    → Large downloads or slow network; try again later")?;
         }
 
         if !self.casks.skipped_invalid.is_empty() {
