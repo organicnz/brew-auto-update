@@ -177,6 +177,15 @@ fn attempt_recovery(cask_name: &str, original_app_path: Option<&str>, config: &C
 /// Maximum time to wait for a single cask upgrade (30 minutes)
 const CASK_UPGRADE_TIMEOUT_SECS: u64 = 1800;
 
+/// Casks to skip entirely (manual installers, auth required, known issues)
+const IGNORED_CASKS: &[&str] = &[
+    "battle-net",
+    "microsoft-edge",
+    "visual-studio-code",
+    "vmware-fusion",
+    "windscribe",
+];
+
 /// Run a command with a timeout, returning the output or an error
 fn run_with_timeout(cmd: &mut Command, timeout_secs: u64) -> Result<Output, String> {
     let mut child = cmd
@@ -298,6 +307,15 @@ pub fn upgrade_casks(config: &Config) -> CaskStats {
             return stats;
         }
     };
+
+    // Filter out ignored casks
+    let outdated_casks: Vec<String> = outdated_casks
+        .into_iter()
+        .filter(|c| {
+            let name = c.split_whitespace().next().unwrap_or(c);
+            !IGNORED_CASKS.contains(&name)
+        })
+        .collect();
 
     if outdated_casks.is_empty() {
         utils::log("✓ All casks are up to date", config);
