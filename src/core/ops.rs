@@ -46,6 +46,26 @@ fn get_cask_app_path(cask_name: &str) -> Option<String> {
     None
 }
 
+/// Get the Homebrew prefix directory
+fn get_homebrew_prefix() -> Option<String> {
+    // Try `brew --prefix` first
+    if let Ok(output) = Command::new("brew").arg("--prefix").output() {
+        if output.status.success() {
+            let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !prefix.is_empty() && std::path::Path::new(&prefix).exists() {
+                return Some(prefix);
+            }
+        }
+    }
+    // Fallback to known paths
+    for prefix in &["/opt/homebrew", "/usr/local"] {
+        if std::path::Path::new(prefix).exists() {
+            return Some(prefix.to_string());
+        }
+    }
+    None
+}
+
 /// Remove quarantine attribute from an application
 fn remove_quarantine(app_path: &str, config: &Config) {
     // Verify the path exists before attempting to remove quarantine
@@ -121,6 +141,84 @@ pub fn remove_all_quarantine(config: &Config) -> usize {
         utils::log(&format!("✓ Removed quarantine from {} apps", count), config);
     } else {
         utils::log("✓ No quarantine attributes found", config);
+    }
+
+    count
+}
+
+/// Remove quarantine attribute from ALL Homebrew formula binaries
+/// This prevents Gatekeeper "Apple could not verify" warnings for CLI tools
+pub fn remove_all_formula_quarantine(config: &Config) -> usize {
+    utils::log("🔓 Removing quarantine from formula binaries...", config);
+
+    let prefix = match get_homebrew_prefix() {
+        Some(p) => p,
+        None => {
+            utils::log("  ⚠ Could not determine Homebrew prefix", config);
+            return 0;
+        }
+    };
+
+    let bin_dir = format!("{}/bin", prefix);
+    let bin_path = std::path::Path::new(&bin_dir);
+
+    if !bin_path.exists() {
+        utils::log("  ⚠ Homebrew bin directory not found", config);
+        return 0;
+    }
+
+    let entries = match std::fs::read_dir(bin_path) {
+        Ok(e) => e,
+        Err(_) => {
+            utils::log("  ⚠ Could not read Homebrew bin directory", config);
+            return 0;
+        }
+    };
+
+    let mut count = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Skip directories, only process files and symlinks
+        if path.is_dir() {
+            continue;
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+
+        // Check if file has quarantine attribute before removing
+        let has_quarantine = Command::new("xattr")
+            .args(["-l", &path_str])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("com.apple.quarantine"))
+            .unwrap_or(false);
+
+        if has_quarantine {
+            match Command::new("xattr")
+                .args(["-dr", "com.apple.quarantine", &path_str])
+                .output()
+            {
+                Ok(o) if o.status.success() => {
+                    if let Some(name) = path.file_name() {
+                        utils::log(&format!("  ✓ {}", name.to_string_lossy()), config);
+                    }
+                    count += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if count > 0 {
+        utils::log(
+            &format!("✓ Removed quarantine from {} formula binaries", count),
+            config,
+        );
+    } else {
+        utils::log(
+            "✓ No quarantine attributes found on formula binaries",
+            config,
+        );
     }
 
     count

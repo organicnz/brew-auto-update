@@ -106,6 +106,9 @@ fn main() {
     log("\n", &config);
     ops::remove_all_quarantine(&config);
 
+    // Remove quarantine from formula binaries
+    ops::remove_all_formula_quarantine(&config);
+
     // Update NPM (with invalid package detection)
     let (npm_success, invalid_npm_packages) = ops::update_npm(&config);
     if !npm_success {
