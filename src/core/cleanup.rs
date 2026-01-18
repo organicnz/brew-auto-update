@@ -91,12 +91,12 @@ pub fn comprehensive_cleanup(config: &Config, aggressive: bool) -> CleanupStats 
     stats
 }
 
-fn cleanup_homebrew(config: &Config, stats: &mut CleanupStats, aggressive: bool) {
+fn cleanup_homebrew(config: &Config, stats: &mut CleanupStats, _aggressive: bool) {
     utils::log("  🍺 Cleaning Homebrew...", config);
 
-    let prune_days = if aggressive { "3" } else { "14" };
+    // Always use --prune=all to remove all cached downloads (they can be re-downloaded)
     if let Ok(output) = Command::new("brew")
-        .args(["cleanup", &format!("--prune={}", prune_days), "-s"])
+        .args(["cleanup", "--prune=all", "-s"])
         .output()
     {
         if output.status.success() {
@@ -118,15 +118,46 @@ fn cleanup_homebrew(config: &Config, stats: &mut CleanupStats, aggressive: bool)
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
-    let cache_dirs = [
-        format!("{}/Library/Caches/Homebrew", home),
-        format!("{}/Library/Caches/Homebrew/downloads", home),
-        format!("{}/Library/Caches/Homebrew/Cask", home),
-    ];
 
-    let max_age = if aggressive { 3 } else { 14 };
-    for cache_dir in &cache_dirs {
-        let freed = clean_old_files(cache_dir, max_age, stats);
+    // Clean downloads directory completely - these are just cached .dmg/.pkg files
+    let downloads_dir = format!("{}/Library/Caches/Homebrew/downloads", home);
+    if Path::new(&downloads_dir).exists() {
+        let freed = get_dir_size(&downloads_dir);
+        if let Ok(entries) = std::fs::read_dir(&downloads_dir) {
+            for entry in entries.flatten() {
+                let removed = if entry.path().is_file() {
+                    std::fs::remove_file(entry.path()).is_ok()
+                } else if entry.path().is_dir() {
+                    std::fs::remove_dir_all(entry.path()).is_ok()
+                } else {
+                    false
+                };
+                if removed {
+                    stats.files_removed += 1;
+                }
+            }
+        }
+        stats.brew_cache_freed += freed;
+    }
+
+    // Clean Cask cache completely as well
+    let cask_dir = format!("{}/Library/Caches/Homebrew/Cask", home);
+    if Path::new(&cask_dir).exists() {
+        let freed = get_dir_size(&cask_dir);
+        if let Ok(entries) = std::fs::read_dir(&cask_dir) {
+            for entry in entries.flatten() {
+                let removed = if entry.path().is_file() {
+                    std::fs::remove_file(entry.path()).is_ok()
+                } else if entry.path().is_dir() {
+                    std::fs::remove_dir_all(entry.path()).is_ok()
+                } else {
+                    false
+                };
+                if removed {
+                    stats.files_removed += 1;
+                }
+            }
+        }
         stats.brew_cache_freed += freed;
     }
 
@@ -190,8 +221,9 @@ fn cleanup_cargo(config: &Config, stats: &mut CleanupStats, home: &str) {
 fn cleanup_system_caches(config: &Config, stats: &mut CleanupStats, home: &str, aggressive: bool) {
     utils::log("  💻 Cleaning system caches...", config);
 
-    let max_age = if aggressive { 3 } else { 14 };
+    let max_age = if aggressive { 1 } else { 7 };
 
+    // Standard app caches
     let cache_dirs = [
         format!("{}/Library/Caches/com.apple.dt.Xcode", home),
         format!("{}/Library/Caches/org.swift.swiftpm", home),
@@ -209,22 +241,171 @@ fn cleanup_system_caches(config: &Config, stats: &mut CleanupStats, home: &str, 
         }
     }
 
+    // App caches that can be fully cleaned (will regenerate)
+    let cleanable_caches = [
+        format!("{}/Library/Caches/company.thebrowser.dia", home), // Dia browser
+        format!("{}/Library/Caches/Dia", home),
+        format!("{}/Library/Caches/loom-updater", home), // Loom updater cache
+        format!("{}/Library/Caches/com.loom.desktop", home),
+        format!("{}/Library/Caches/SiriTTS", home), // Siri text-to-speech cache
+        format!("{}/Library/Caches/GeoServices", home), // Maps cache
+    ];
+
+    for cache_dir in &cleanable_caches {
+        if Path::new(cache_dir).exists() {
+            let freed = clean_dir_contents(cache_dir, stats);
+            stats.system_cache_freed += freed;
+        }
+    }
+
+    // Xcode DerivedData - clean completely in aggressive mode, or old projects otherwise
     let derived_data = format!("{}/Library/Developer/Xcode/DerivedData", home);
     if Path::new(&derived_data).exists() {
-        let freed = clean_old_files(&derived_data, max_age, stats);
-        stats.system_cache_freed += freed;
+        if aggressive {
+            // In aggressive mode, clear all DerivedData
+            let freed = clean_dir_contents(&derived_data, stats);
+            stats.system_cache_freed += freed;
+        } else {
+            let freed = clean_old_files(&derived_data, 7, stats);
+            stats.system_cache_freed += freed;
+        }
     }
 
     let device_support = format!("{}/Library/Developer/Xcode/iOS DeviceSupport", home);
     if Path::new(&device_support).exists() {
-        let freed = clean_old_dirs(&device_support, 60, stats);
+        let freed = clean_old_dirs(&device_support, 30, stats);
         stats.system_cache_freed += freed;
+    }
+
+    // Xcode Archives older than 30 days
+    let archives = format!("{}/Library/Developer/Xcode/Archives", home);
+    if Path::new(&archives).exists() {
+        let freed = clean_old_dirs(&archives, 30, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // iOS Simulator cleanup
+    cleanup_ios_simulators(config, stats);
+
+    // Android SDK cleanup
+    cleanup_android_sdk(config, stats, home, aggressive);
+}
+
+/// Clean all contents of a directory without removing the directory itself
+fn clean_dir_contents(dir: &str, stats: &mut CleanupStats) -> u64 {
+    let mut freed: u64 = 0;
+
+    if !Path::new(dir).exists() {
+        return 0;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let size = if entry.path().is_file() {
+                entry.metadata().map(|m| m.len()).unwrap_or(0)
+            } else if entry.path().is_dir() {
+                get_dir_size(&entry.path().to_string_lossy())
+            } else {
+                0
+            };
+
+            let removed = if entry.path().is_file() {
+                std::fs::remove_file(entry.path()).is_ok()
+            } else if entry.path().is_dir() {
+                std::fs::remove_dir_all(entry.path()).is_ok()
+            } else {
+                false
+            };
+
+            if removed {
+                freed += size;
+                stats.files_removed += 1;
+            }
+        }
+    }
+
+    freed
+}
+
+/// Clean unavailable iOS Simulators
+fn cleanup_ios_simulators(config: &Config, stats: &mut CleanupStats) {
+    if !command_exists("xcrun") {
+        return;
+    }
+
+    // Delete unavailable simulators
+    if let Ok(output) = Command::new("xcrun")
+        .args(["simctl", "delete", "unavailable"])
+        .output()
+    {
+        if output.status.success() {
+            utils::log("    Removed unavailable iOS simulators", config);
+        }
+    }
+
+    // Erase all simulator data (in aggressive mode this could save GBs)
+    // We don't do full erase as it's too aggressive, but we clean caches
+    let home = std::env::var("HOME").unwrap_or_default();
+    let sim_caches = format!("{}/Library/Developer/CoreSimulator/Caches", home);
+    if Path::new(&sim_caches).exists() {
+        let freed = clean_dir_contents(&sim_caches, stats);
+        stats.system_cache_freed += freed;
+    }
+}
+
+/// Clean Android SDK caches
+fn cleanup_android_sdk(config: &Config, stats: &mut CleanupStats, home: &str, aggressive: bool) {
+    let android_home = std::env::var("ANDROID_HOME")
+        .or_else(|_| std::env::var("ANDROID_SDK_ROOT"))
+        .unwrap_or_else(|_| format!("{}/Library/Android/sdk", home));
+
+    if !Path::new(&android_home).exists() {
+        return;
+    }
+
+    utils::log("    Cleaning Android SDK caches...", config);
+
+    // Clean build cache
+    let build_cache = format!("{}/.android/build-cache", home);
+    if Path::new(&build_cache).exists() {
+        let freed = clean_dir_contents(&build_cache, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Clean AVD cache (not the AVDs themselves)
+    let avd_cache = format!("{}/.android/cache", home);
+    if Path::new(&avd_cache).exists() {
+        let freed = clean_dir_contents(&avd_cache, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Gradle build outputs in Android projects (be careful here)
+    let gradle_caches = format!("{}/.gradle/caches/build-cache-1", home);
+    if Path::new(&gradle_caches).exists() {
+        let max_age = if aggressive { 7 } else { 30 };
+        let freed = clean_old_files(&gradle_caches, max_age, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Clean old Android SDK components that are no longer needed
+    // This is conservative - only removes cache directories
+    let sdk_cache_dirs = [
+        format!("{}/cache", android_home),
+        format!("{}/.temp", android_home),
+    ];
+
+    for cache_dir in &sdk_cache_dirs {
+        if Path::new(cache_dir).exists() {
+            let freed = clean_dir_contents(cache_dir, stats);
+            stats.system_cache_freed += freed;
+        }
     }
 }
 
 fn cleanup_dev_caches(config: &Config, stats: &mut CleanupStats, home: &str) {
     utils::log("  🛠️  Cleaning dev tool caches...", config);
 
+    // VS Code caches
     let vscode_caches = [
         format!("{}/Library/Application Support/Code/Cache", home),
         format!("{}/Library/Application Support/Code/CachedData", home),
@@ -237,13 +418,67 @@ fn cleanup_dev_caches(config: &Config, stats: &mut CleanupStats, home: &str) {
         stats.system_cache_freed += freed;
     }
 
+    // Gradle caches
     let gradle_cache = format!("{}/.gradle/caches", home);
     let freed = clean_old_files(&gradle_cache, 30, stats);
     stats.system_cache_freed += freed;
 
+    // CocoaPods cache
     let cocoapods_cache = format!("{}/Library/Caches/CocoaPods", home);
     let freed = clean_old_files(&cocoapods_cache, 14, stats);
     stats.system_cache_freed += freed;
+
+    // Node.js related caches (can be fully cleaned)
+    let node_caches = [
+        format!("{}/Library/Caches/node-gyp", home), // node-gyp build cache
+        format!("{}/Library/Caches/ms-playwright", home), // Playwright browsers
+        format!("{}/Library/Caches/ms-playwright-go", home),
+        format!("{}/Library/Caches/next-swc", home), // Next.js SWC cache
+        format!("{}/Library/Caches/turbo", home),    // Turborepo cache
+        format!("{}/Library/Caches/esbuild", home),  // esbuild cache
+    ];
+
+    for cache in &node_caches {
+        if Path::new(cache).exists() {
+            let freed = clean_dir_contents(cache, stats);
+            stats.system_cache_freed += freed;
+        }
+    }
+
+    // Python caches
+    let python_caches = [
+        format!("{}/Library/Caches/pip", home), // pip cache
+        format!("{}/.cache/pip", home),         // pip cache (Linux-style)
+        format!("{}/Library/Caches/uv", home),  // uv (fast pip) cache
+    ];
+
+    for cache in &python_caches {
+        if Path::new(cache).exists() {
+            let freed = clean_dir_contents(cache, stats);
+            stats.system_cache_freed += freed;
+        }
+    }
+
+    // Deno cache
+    let deno_cache = format!("{}/Library/Caches/deno", home);
+    if Path::new(&deno_cache).exists() {
+        let freed = clean_dir_contents(&deno_cache, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Go module cache (can be large)
+    let go_cache = format!("{}/Library/Caches/go-build", home);
+    if Path::new(&go_cache).exists() {
+        let freed = clean_old_files(&go_cache, 14, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Claude CLI cache
+    let claude_cache = format!("{}/Library/Caches/claude-cli-nodejs", home);
+    if Path::new(&claude_cache).exists() {
+        let freed = clean_old_files(&claude_cache, 7, stats);
+        stats.system_cache_freed += freed;
+    }
 
     if command_exists("yarn") {
         let _ = Command::new("yarn").args(["cache", "clean"]).output();
@@ -260,6 +495,10 @@ fn cleanup_dev_caches(config: &Config, stats: &mut CleanupStats, home: &str) {
     if command_exists("docker") {
         let _ = Command::new("docker")
             .args(["image", "prune", "-f"])
+            .output();
+        // Also prune build cache
+        let _ = Command::new("docker")
+            .args(["builder", "prune", "-f"])
             .output();
     }
 }
