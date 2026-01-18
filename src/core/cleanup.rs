@@ -70,6 +70,11 @@ pub fn comprehensive_cleanup(config: &Config, aggressive: bool) -> CleanupStats 
     cleanup_cargo(config, &mut stats, &home);
     cleanup_system_caches(config, &mut stats, &home, aggressive);
     cleanup_dev_caches(config, &mut stats, &home);
+    cleanup_timemachine_snapshots(config, &mut stats);
+    cleanup_mail_messages(config, &mut stats, &home);
+    cleanup_browser_caches(config, &mut stats, &home);
+    cleanup_system_diagnostics(config, &mut stats, &home);
+    cleanup_xcode_packages(config, &mut stats, &home);
     cleanup_old_logs(config, &mut stats, &home);
     cleanup_temp_files(config, &mut stats);
     cleanup_stale_locks(config, &mut stats);
@@ -500,6 +505,165 @@ fn cleanup_dev_caches(config: &Config, stats: &mut CleanupStats, home: &str) {
         let _ = Command::new("docker")
             .args(["builder", "prune", "-f"])
             .output();
+    }
+}
+
+/// Clean Time Machine local snapshots
+fn cleanup_timemachine_snapshots(config: &Config, stats: &mut CleanupStats) {
+    utils::log("  🕐 Cleaning Time Machine snapshots...", config);
+
+    // List local snapshots - this works without sudo
+    if let Ok(output) = Command::new("tmutil")
+        .args(["listlocalsnapshots", "/"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            // Snapshot names start with "com.apple.TimeMachine"
+            if line.starts_with("com.apple.TimeMachine") {
+                // Try to delete - will fail silently without sudo
+                let _ = Command::new("tmutil")
+                    .args(["deletelocalsnapshots", line.trim()])
+                    .output();
+                stats.files_removed += 1;
+            }
+        }
+    }
+}
+
+/// Clean Mail and Messages caches
+fn cleanup_mail_messages(config: &Config, stats: &mut CleanupStats, home: &str) {
+    utils::log("  📧 Cleaning Mail & Messages caches...", config);
+
+    // Mail caches - safe to clean
+    let mail_caches = [
+        format!("{}/Library/Caches/com.apple.mail", home),
+        format!("{}/Library/Caches/com.apple.MobileSMS", home),
+    ];
+
+    for cache in &mail_caches {
+        if Path::new(cache).exists() {
+            let freed = clean_dir_contents(cache, stats);
+            stats.system_cache_freed += freed;
+        }
+    }
+
+    // Mail Downloads - clean old files (30+ days)
+    let mail_downloads = format!("{}/Library/Mail Downloads", home);
+    if Path::new(&mail_downloads).exists() {
+        let freed = clean_old_files(&mail_downloads, 30, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Messages attachments - clean old files (30+ days)
+    let messages_attachments = format!("{}/Library/Messages/Attachments", home);
+    if Path::new(&messages_attachments).exists() {
+        let freed = clean_old_files(&messages_attachments, 30, stats);
+        stats.system_cache_freed += freed;
+    }
+}
+
+/// Clean browser caches (Safari and third-party browsers)
+fn cleanup_browser_caches(config: &Config, stats: &mut CleanupStats, home: &str) {
+    utils::log("  🌐 Cleaning browser caches...", config);
+
+    // Browser caches - can be fully cleaned (will regenerate)
+    let browser_caches = [
+        format!("{}/Library/Caches/com.apple.Safari", home),
+        format!("{}/Library/Caches/com.brave.Browser", home),
+        format!("{}/Library/Caches/com.google.Chrome", home),
+        format!("{}/Library/Caches/org.mozilla.firefox", home),
+        format!("{}/Library/Caches/com.microsoft.edgemac", home),
+        format!("{}/Library/Caches/company.thebrowser.Browser", home), // Arc
+    ];
+
+    for cache in &browser_caches {
+        if Path::new(cache).exists() {
+            let freed = clean_dir_contents(cache, stats);
+            stats.system_cache_freed += freed;
+        }
+    }
+
+    // Safari local storage - clean old files (30+ days)
+    let safari_storage = format!("{}/Library/Safari/LocalStorage", home);
+    if Path::new(&safari_storage).exists() {
+        let freed = clean_old_files(&safari_storage, 30, stats);
+        stats.system_cache_freed += freed;
+    }
+}
+
+/// Clean system logs and diagnostic reports
+fn cleanup_system_diagnostics(config: &Config, stats: &mut CleanupStats, home: &str) {
+    utils::log("  📊 Cleaning system diagnostics...", config);
+
+    // User-level diagnostic reports - can be cleaned
+    let user_diagnostics = [
+        format!("{}/Library/Logs/DiagnosticReports", home),
+        format!("{}/Library/Logs/CrashReporter", home),
+        format!("{}/Library/Application Support/CrashReporter", home),
+    ];
+
+    for diag_dir in &user_diagnostics {
+        if Path::new(diag_dir).exists() {
+            let freed = clean_dir_contents(diag_dir, stats);
+            stats.system_cache_freed += freed;
+        }
+    }
+
+    // System-level diagnostic reports (may require permissions)
+    let system_diagnostics = "/Library/Logs/DiagnosticReports";
+    if Path::new(system_diagnostics).exists() {
+        let freed = clean_dir_contents(system_diagnostics, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // System logs - clean old files only (7+ days)
+    let var_log = "/var/log";
+    if Path::new(var_log).exists() {
+        // Only clean old .log files, not current ones
+        clean_old_log_files(var_log, 7, stats);
+    }
+}
+
+/// Clean old/deprecated Swift packages and unused Xcode frameworks
+fn cleanup_xcode_packages(config: &Config, stats: &mut CleanupStats, home: &str) {
+    utils::log("  🔨 Cleaning old Swift packages...", config);
+
+    // Swift Package Manager - old cached packages (30+ days)
+    let swiftpm_cache = format!("{}/Library/Caches/org.swift.swiftpm", home);
+    if Path::new(&swiftpm_cache).exists() {
+        let freed = clean_old_dirs(&swiftpm_cache, 30, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Swift PM repositories - old checkouts (60+ days)
+    let swiftpm_repos = format!("{}/Library/org.swift.swiftpm/repositories", home);
+    if Path::new(&swiftpm_repos).exists() {
+        let freed = clean_old_dirs(&swiftpm_repos, 60, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Old module cache (30+ days) - precompiled Swift modules
+    let module_cache = format!(
+        "{}/Library/Developer/Xcode/DerivedData/ModuleCache.noindex",
+        home
+    );
+    if Path::new(&module_cache).exists() {
+        let freed = clean_old_dirs(&module_cache, 30, stats);
+        stats.system_cache_freed += freed;
+    }
+
+    // Old Swift build artifacts in SourcePackages (60+ days)
+    // These are resolved package dependencies that can be re-fetched
+    if let Ok(entries) = std::fs::read_dir(format!("{}/Library/Developer/Xcode/DerivedData", home))
+    {
+        for entry in entries.flatten() {
+            let source_packages = entry.path().join("SourcePackages");
+            if source_packages.exists() {
+                let freed = clean_old_dirs(&source_packages.to_string_lossy(), 60, stats);
+                stats.system_cache_freed += freed;
+            }
+        }
     }
 }
 
